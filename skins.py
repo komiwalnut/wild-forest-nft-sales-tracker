@@ -5,7 +5,7 @@ import os
 import csv
 from fastapi import FastAPI, Response
 import uvicorn
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,7 +24,7 @@ HEADERS = {
 }
 
 GRAPHQL_QUERY = '''
-query SoldPacks($tokenAddress: String = "0x0328b534d094b097020b4538230f998027a54db0") {
+query SoldSkins($tokenAddress: String = "0xa899849929e113315200609be208e6a0858f645c") {
   recentlySolds(size: 40, tokenAddress: $tokenAddress, from: %d) {
     results {
       maker
@@ -34,7 +34,6 @@ query SoldPacks($tokenAddress: String = "0x0328b534d094b097020b4538230f998027a54
       timestamp
       txHash
       orderKind
-      quantity
       assets {
         id
         token {
@@ -66,13 +65,14 @@ def get_week_timestamps():
         0,
         tzinfo=timezone.utc
     ).timestamp())
-    return start_timestamp, start_timestamp + 7 * 24 * 60 * 60
+    end_timestamp = start_timestamp + 7 * 24 * 60 * 60
+    return start_timestamp, end_timestamp
 
 
 def get_current_filename():
     start_ts, _ = get_week_timestamps()
-    os.makedirs("./packs_buyers", exist_ok=True)
-    return f"./packs_buyers/packs_buyers_{start_ts}.csv"
+    os.makedirs("./skins_buyers", exist_ok=True)
+    return f"./skins_buyers/skins_buyers_{start_ts}.csv"
 
 
 def get_download_filename():
@@ -101,7 +101,7 @@ def save_buyers(buyer_records):
         filename = get_current_filename()
 
         with open(filename, "w", newline='') as f:
-            fieldnames = ['buyer', 'packs_id & quantity', 'price', 'txHash', 'timestamp']
+            fieldnames = ['buyer', 'skins_id', 'price', 'txHash', 'timestamp']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(buyer_records)
@@ -176,7 +176,6 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
                 if not asset_id:
                     continue
 
-                quantity = int(tx.get("quantity", 1))
                 purchase_id = f"{txhash}_{asset_id}"
 
                 if purchase_id in recorded_purchases:
@@ -184,7 +183,7 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
 
                 record = {
                     "buyer": buyer,
-                    "packs_id & quantity": f"{asset_id} {quantity}x",
+                    "skins_id": asset_id,
                     "price": format_price(amount, tokenSymbol[0]),
                     "txHash": txhash,
                     "timestamp": ts
@@ -237,7 +236,6 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
                 if not asset_id:
                     continue
 
-                quantity = int(tx.get("quantity", 1))
                 purchase_id = f"{txhash}_{asset_id}"
 
                 if purchase_id in recorded_purchases:
@@ -245,7 +243,7 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
 
                 record = {
                     "buyer": buyer,
-                    "packs_id & quantity": f"{asset_id} {quantity}x",
+                    "skins_id": asset_id,
                     "price": format_price(amount, tokenSymbol[0]),
                     "txHash": txhash,
                     "timestamp": ts
@@ -275,14 +273,16 @@ async def background_task():
 
         if not os.path.exists(current_filename):
             with open(current_filename, 'w') as f:
-                writer = csv.DictWriter(f, fieldnames=['buyer', 'packs_id & quantity', 'price', 'txHash', 'timestamp'])
+                writer = csv.DictWriter(f, fieldnames=['buyer', 'skins_id', 'price', 'txHash', 'timestamp'])
                 writer.writeheader()
             print(f"Created new weekly file: {current_filename}")
 
         buyer_records = load_buyers()
-        recorded_purchases = {f"{record['txHash']}_{record['packs_id & quantity'].split()[0]}"
-                              for record in buyer_records
-                              if "txHash" in record and "packs_id & quantity" in record}
+        recorded_purchases = {
+            f"{record['txHash']}_{record['skins_id'].split()[0]}"
+            for record in buyer_records
+            if "txHash" in record and "skins_id" in record
+        }
 
         async with aiohttp.ClientSession() as session:
             await historical_backfill(buyer_records, recorded_purchases, session)
@@ -330,21 +330,21 @@ def find_latest_csv(directory: str, prefix: str) -> str:
         return None
 
 
-@app.get("/packs_buyers/{timestamp}")
+@app.get("/skins_buyers/{timestamp}")
 async def get_buyers_with_timestamp(timestamp: int):
-    filename = f"./packs_buyers/packs_buyers_{timestamp}.csv"
+    filename = f"./skins_buyers/skins_buyers_{timestamp}.csv"
     return _serve_csv(filename)
 
 
-@app.get("/packs_buyers/")
+@app.get("/skins_buyers/")
 async def get_current_buyers():
     current_ts, _ = get_week_timestamps()
-    current_filename = f"./packs_buyers/packs_buyers_{current_ts}.csv"
+    current_filename = f"./skins_buyers/skins_buyers_{current_ts}.csv"
 
     if os.path.exists(current_filename):
         return _serve_csv(current_filename)
     else:
-        latest_file = find_latest_csv("./packs_buyers", "packs_buyers_")
+        latest_file = find_latest_csv("./skins_buyers", "skins_buyers_")
         if latest_file:
             return _serve_csv(latest_file)
         else:
@@ -370,4 +370,4 @@ async def startup_event():
 
 
 if __name__ == "__main__":
-    uvicorn.run("packs:app", host="0.0.0.0", port=8002, reload=False)
+    uvicorn.run("skins:app", host="0.0.0.0", port=8006, reload=False)

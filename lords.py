@@ -65,18 +65,17 @@ def get_week_timestamps():
         0,
         tzinfo=timezone.utc
     ).timestamp())
-    end_timestamp = start_timestamp + 7 * 24 * 60 * 60
-    return start_timestamp, end_timestamp
+    return start_timestamp, start_timestamp + 7 * 24 * 60 * 60
 
 
 def get_current_filename():
     start_ts, _ = get_week_timestamps()
-    return f"lords_buyers_{start_ts}.csv"
+    os.makedirs("./lords_buyers", exist_ok=True)
+    return f"./lords_buyers/lords_buyers_{start_ts}.csv"
 
 
 def get_download_filename():
-    start_ts, _ = get_week_timestamps()
-    return f"lords_buyers_{start_ts}.csv"
+    return get_current_filename()
 
 
 def load_buyers():
@@ -268,11 +267,14 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
 
 async def background_task():
     while True:
+        current_week_start, current_week_end = get_week_timestamps()
         current_filename = get_current_filename()
+
         if not os.path.exists(current_filename):
             with open(current_filename, 'w') as f:
                 writer = csv.DictWriter(f, fieldnames=['buyer', 'lords_id', 'price', 'txHash', 'timestamp'])
                 writer.writeheader()
+            print(f"Created new weekly file: {current_filename}")
 
         buyer_records = load_buyers()
         recorded_purchases = {f"{record['txHash']}_{record['lords_id']}"
@@ -280,49 +282,83 @@ async def background_task():
                               if "txHash" in record and "lords_id" in record}
 
         async with aiohttp.ClientSession() as session:
-            start_ts, _ = get_week_timestamps()
-
             await historical_backfill(buyer_records, recorded_purchases, session)
             save_buyers(buyer_records)
 
-            if buyer_records:
-                last_timestamp = max(record["timestamp"] for record in buyer_records)
-            else:
-                last_timestamp = start_ts
+            last_timestamp = current_week_start if not buyer_records else max(r["timestamp"] for r in buyer_records)
 
             while True:
                 try:
-                    current_week_start, current_week_end = get_week_timestamps()
-                    if datetime.now(timezone.utc).timestamp() > current_week_end:
+                    current_time = datetime.now(timezone.utc).timestamp()
+                    if current_time > current_week_end:
+                        print("End timestamp reached, starting new week...")
                         break
 
-                    last_timestamp = await poll_new_transactions(buyer_records, recorded_purchases, last_timestamp, session)
+                    last_timestamp = await poll_new_transactions(
+                        buyer_records, recorded_purchases, last_timestamp, session
+                    )
+
                 except Exception as e:
-                    print("Error during polling:", e)
+                    print(f"Error in polling loop: {str(e)}")
+
                 await asyncio.sleep(60)
+
+        buyer_records.clear()
+        recorded_purchases.clear()
+        print("Preparing for new weekly cycle...")
 
 
 app = FastAPI()
 
 
-@app.get("/lords_buyers")
-async def get_buyers():
-    filename = get_current_filename()
-    if os.path.exists(filename):
-        try:
-            with open(filename, 'rb') as f:
-                content = f.read()
-                download_filename = get_download_filename()
-                return Response(
-                    content=content,
-                    media_type="text/csv",
-                    headers={
-                        'Content-Disposition': f'attachment; filename={download_filename}'
-                    }
-                )
-        except Exception as e:
-            return {"error": f"Error reading lords buyers file: {e}"}
-    return {"error": f"{filename} not found"}
+def find_latest_csv(directory: str, prefix: str) -> str:
+    try:
+        files = os.listdir(directory)
+        matching_files = [f for f in files if f.startswith(prefix) and f.endswith(".csv")]
+        if not matching_files:
+            return None
+        latest_file = max(
+            matching_files,
+            key=lambda x: int(x.split("_")[-1].replace(".csv", ""))
+        )
+        return os.path.join(directory, latest_file)
+    except Exception as e:
+        print(f"Error finding latest CSV: {e}")
+        return None
+
+
+@app.get("/lords_buyers/{timestamp}")
+async def get_buyers_with_timestamp(timestamp: int):
+    filename = f"./lords_buyers/lords_buyers_{timestamp}.csv"
+    return _serve_csv(filename)
+
+
+@app.get("/lords_buyers/")
+async def get_current_buyers():
+    current_ts, _ = get_week_timestamps()
+    current_filename = f"./lords_buyers/lords_buyers_{current_ts}.csv"
+
+    if os.path.exists(current_filename):
+        return _serve_csv(current_filename)
+    else:
+        latest_file = find_latest_csv("./lords_buyers", "lords_buyers_")
+        if latest_file:
+            return _serve_csv(latest_file)
+        else:
+            raise HTTPException(status_code=404, detail="No buyers data found")
+
+
+def _serve_csv(filename: str) -> Response:
+    try:
+        with open(filename, 'rb') as f:
+            content = f.read()
+            return Response(
+                content=content,
+                media_type="text/csv",
+                headers={'Content-Disposition': f'attachment; filename={os.path.basename(filename)}'}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
 
 @app.on_event("startup")

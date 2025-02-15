@@ -26,13 +26,13 @@ def get_week_timestamps():
 
 def get_current_buyers_filename():
     start_ts, _ = get_week_timestamps()
-    return f"./lords_buyers/lords_buyers_{start_ts}.csv"
+    return f"./units_buyers/units_buyers_{start_ts}.csv"
 
 
 def get_current_unique_filename():
     start_ts, _ = get_week_timestamps()
-    os.makedirs("./lords_unique", exist_ok=True)
-    return f"./lords_unique/lords_unique_{start_ts}.csv"
+    os.makedirs("./units_unique", exist_ok=True)
+    return f"./units_unique/units_unique_{start_ts}.csv"
 
 
 def load_buyers():
@@ -81,7 +81,7 @@ def update_unique_buyers():
             writer.writerows(csv_data)
 
     except Exception as e:
-        print(f"Error updating unique buyers: {e}")
+        print(f"Error updating units unique buyers: {e}")
 
 
 def find_latest_csv(directory: str, prefix: str) -> str:
@@ -100,21 +100,21 @@ def find_latest_csv(directory: str, prefix: str) -> str:
         return None
 
 
-@app.get("/lords_unique/{timestamp}")
+@app.get("/units_unique/{timestamp}")
 async def get_unique_with_timestamp(timestamp: int):
-    filename = f"./lords_unique/lords_unique_{timestamp}.csv"
+    filename = f"./units_unique/units_unique_{timestamp}.csv"
     return _serve_csv(filename)
 
 
-@app.get("/lords_unique/")
+@app.get("/units_unique/")
 async def get_current_unique():
     current_ts, _ = get_week_timestamps()
-    current_filename = f"./lords_unique/lords_unique_{current_ts}.csv"
+    current_filename = f"./units_unique/units_unique_{current_ts}.csv"
 
     if os.path.exists(current_filename):
         return _serve_csv(current_filename)
     else:
-        latest_file = find_latest_csv("./lords_unique", "lords_unique_")
+        latest_file = find_latest_csv("./units_unique", "units_unique_")
         if latest_file:
             return _serve_csv(latest_file)
         else:
@@ -141,10 +141,10 @@ async def startup_event():
 
 async def background_task():
     while True:
-        os.makedirs("./lords_unique", exist_ok=True)
+        os.makedirs("./units_unique", exist_ok=True)
         update_unique_buyers()
         await asyncio.sleep(60)
 
 
 if __name__ == "__main__":
-    uvicorn.run("lords_unique:app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run("units_unique:app", host="0.0.0.0", port=8005, reload=False)

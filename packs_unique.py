@@ -26,12 +26,13 @@ def get_week_timestamps():
 
 def get_current_buyers_filename():
     start_ts, _ = get_week_timestamps()
-    return f"packs_buyers_{start_ts}.csv"
+    return f"./packs_buyers/packs_buyers_{start_ts}.csv"
 
 
 def get_current_unique_filename():
     start_ts, _ = get_week_timestamps()
-    return f"packs_unique_{start_ts}.csv"
+    os.makedirs("./packs_unique", exist_ok=True)
+    return f"./packs_unique/packs_unique_{start_ts}.csv"
 
 
 def load_buyers():
@@ -83,20 +84,54 @@ def update_unique_buyers():
         print(f"Error updating packs unique buyers: {e}")
 
 
-@app.get("/packs_unique")
-async def get_unique_buyers():
-    filename = get_current_unique_filename()
-    if os.path.exists(filename):
-        try:
-            with open(filename, 'rb') as f:
-                return Response(
-                    content=f.read(),
-                    media_type="text/csv",
-                    headers={'Content-Disposition': f'attachment; filename={os.path.basename(filename)}'}
-                )
-        except Exception as e:
-            return {"error": str(e)}
-    return {"error": "File not found"}
+def find_latest_csv(directory: str, prefix: str) -> str:
+    try:
+        files = os.listdir(directory)
+        matching_files = [f for f in files if f.startswith(prefix) and f.endswith(".csv")]
+        if not matching_files:
+            return None
+        latest_file = max(
+            matching_files,
+            key=lambda x: int(x.split("_")[-1].replace(".csv", ""))
+        )
+        return os.path.join(directory, latest_file)
+    except Exception as e:
+        print(f"Error finding latest CSV: {e}")
+        return None
+
+
+@app.get("/packs_unique/{timestamp}")
+async def get_unique_with_timestamp(timestamp: int):
+    filename = f"./packs_unique/packs_unique_{timestamp}.csv"
+    return _serve_csv(filename)
+
+
+@app.get("/packs_unique/")
+async def get_current_unique():
+    current_ts, _ = get_week_timestamps()
+    current_filename = f"./packs_unique/packs_unique_{current_ts}.csv"
+
+    if os.path.exists(current_filename):
+        return _serve_csv(current_filename)
+    else:
+        latest_file = find_latest_csv("./packs_unique", "packs_unique_")
+        if latest_file:
+            return _serve_csv(latest_file)
+        else:
+            raise HTTPException(status_code=404, detail="No unique data found")
+
+
+def _serve_csv(filename: str) -> Response:
+    try:
+        with open(filename, 'rb') as f:
+            content = f.read()
+            return Response(
+                content=content,
+                media_type="text/csv",
+                headers={'Content-Disposition': f'attachment; filename={os.path.basename(filename)}'}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
 
 @app.on_event("startup")
@@ -106,8 +141,10 @@ async def startup_event():
 
 async def background_task():
     while True:
+        os.makedirs("./packs_unique", exist_ok=True)
         update_unique_buyers()
         await asyncio.sleep(60)
+
 
 if __name__ == "__main__":
     uvicorn.run("packs_unique:app", host="0.0.0.0", port=8003, reload=False)
