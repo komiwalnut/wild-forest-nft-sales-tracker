@@ -20,7 +20,7 @@ TOKEN_MAPPING = {
 API_URL = "https://api-gateway.skymavis.com/graphql/mavis-marketplace"
 HEADERS = {
     "Content-Type": "application/json",
-    "X-API-Key": os.getenv("SM_API_KEY")
+    "X-API-Key": os.getenv("SM_API_KEY_2")
 }
 
 GRAPHQL_QUERY = '''
@@ -55,18 +55,24 @@ PAGE_SIZE = 40
 
 
 def get_week_timestamps():
-    now = datetime.now(timezone.utc)
-    start_of_week = now - timedelta(days=now.weekday())
-    start_timestamp = int(datetime(
-        start_of_week.year,
-        start_of_week.month,
-        start_of_week.day,
-        13,
-        0,
-        0,
+    initial_start = datetime(
+        2025, 2, 10,
+        13, 0, 0,
         tzinfo=timezone.utc
-    ).timestamp())
-    return start_timestamp, start_timestamp + 7 * 24 * 60 * 60
+    )
+
+    now = datetime.now(timezone.utc)
+
+    if now < initial_start:
+        start_time = initial_start
+    else:
+        delta = now - initial_start
+        intervals = int(delta.total_seconds() // (7 * 24 * 60 * 60))
+        start_time = initial_start + timedelta(days=7 * intervals)
+
+    end_time = start_time + timedelta(days=7)
+
+    return int(start_time.timestamp()), int(end_time.timestamp())
 
 
 def get_current_filename():
@@ -295,6 +301,7 @@ async def background_task():
                     current_time = datetime.now(timezone.utc).timestamp()
                     if current_time > current_week_end:
                         print("End timestamp reached, starting new week...")
+                        await asyncio.sleep(60)
                         break
 
                     last_timestamp = await poll_new_transactions(
