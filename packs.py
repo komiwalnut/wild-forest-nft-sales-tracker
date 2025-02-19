@@ -183,7 +183,7 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
                     continue
 
                 quantity = int(tx.get("quantity", 1))
-                purchase_id = f"{txhash}_{asset_id}"
+                purchase_id = f"{txhash}_{asset_id}_{quantity}"
 
                 if purchase_id in recorded_purchases:
                     continue
@@ -244,7 +244,7 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
                     continue
 
                 quantity = int(tx.get("quantity", 1))
-                purchase_id = f"{txhash}_{asset_id}"
+                purchase_id = f"{txhash}_{asset_id}_{quantity}"
 
                 if purchase_id in recorded_purchases:
                     continue
@@ -286,9 +286,13 @@ async def background_task():
             print(f"Created new weekly file: {current_filename}")
 
         buyer_records = load_buyers()
-        recorded_purchases = {f"{record['txHash']}_{record['packs_id & quantity'].split()[0]}"
-                              for record in buyer_records
-                              if "txHash" in record and "packs_id & quantity" in record}
+        recorded_purchases = set()
+        for record in buyer_records:
+            if "txHash" in record and "packs_id & quantity" in record:
+                parts = record["packs_id & quantity"].split()
+                asset_id = parts[0]
+                quantity = parts[1].rstrip('x')
+                recorded_purchases.add(f"{record['txHash']}_{asset_id}_{quantity}")
 
         async with aiohttp.ClientSession() as session:
             await historical_backfill(buyer_records, recorded_purchases, session)
