@@ -35,6 +35,7 @@ query SoldPacks($tokenAddress: String = "0x0328b534d094b097020b4538230f998027a54
       txHash
       orderKind
       quantity
+      orderId
       assets {
         id
         token {
@@ -155,9 +156,9 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
 
         for tx in transactions:
             ts = tx.get("timestamp", 0)
-            txhash = tx.get("txHash")
+            order_id = tx.get("orderId")
 
-            if not txhash:
+            if not order_id:
                 continue
 
             if ts < start_ts:
@@ -183,7 +184,7 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
                     continue
 
                 quantity = int(tx.get("quantity", 1))
-                purchase_id = f"{txhash}_{asset_id}_{quantity}"
+                purchase_id = f"{order_id}_{asset_id}_{quantity}"
 
                 if purchase_id in recorded_purchases:
                     continue
@@ -192,7 +193,7 @@ async def historical_backfill(buyer_records: list, recorded_purchases: set, sess
                     "buyer": buyer,
                     "packs_id & quantity": f"{asset_id} {quantity}x",
                     "price": format_price(amount, tokenSymbol[0]),
-                    "txHash": txhash,
+                    "txHash": tx.get("txHash"),
                     "timestamp": ts
                 }
                 print(f"Recording historical record: {record}")
@@ -217,12 +218,12 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
 
         for tx in reversed(transactions):
             ts = tx.get("timestamp", 0)
-            txhash = tx.get("txHash")
+            order_id = tx.get("orderId")
 
-            if ts <= last_timestamp:
+            if not order_id:
                 continue
 
-            if not txhash:
+            if ts <= last_timestamp:
                 continue
 
             if ts < start_ts or ts > end_ts:
@@ -244,7 +245,7 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
                     continue
 
                 quantity = int(tx.get("quantity", 1))
-                purchase_id = f"{txhash}_{asset_id}_{quantity}"
+                purchase_id = f"{order_id}_{asset_id}_{quantity}"
 
                 if purchase_id in recorded_purchases:
                     continue
@@ -253,7 +254,7 @@ async def poll_new_transactions(buyer_records: list, recorded_purchases: set, la
                     "buyer": buyer,
                     "packs_id & quantity": f"{asset_id} {quantity}x",
                     "price": format_price(amount, tokenSymbol[0]),
-                    "txHash": txhash,
+                    "txHash": tx.get("txHash"),
                     "timestamp": ts
                 }
                 print(f"Found new record: {record}")
